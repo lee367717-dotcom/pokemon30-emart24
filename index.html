@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>이마트24 포켓몬 30주년 재고조회</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:900px;margin:0 auto;padding:20px;background:#f6f7f9;color:#111}
+.card{background:#fff;border-radius:16px;padding:18px;margin:12px 0;box-shadow:0 2px 12px #00000010}
+h1{font-size:22px;margin:0 0 8px}.muted{color:#666;font-size:13px}
+button{border:0;border-radius:10px;padding:11px 15px;background:#111;color:#fff;font-weight:700;cursor:pointer}
+input{padding:11px;border:1px solid #ddd;border-radius:10px;width:100%;box-sizing:border-box}
+.row{display:flex;gap:8px;align-items:center}.row>*{flex:1}
+.result{padding:12px;border:1px solid #eee;border-radius:12px;margin-top:8px}
+.qty{font-size:20px;font-weight:800}.ok{font-weight:700}.zero{color:#888}.err{color:#c00}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🟡 이마트24 포켓몬 30주년 재고조회</h1>
+<div class="muted">실제 이마트24 재고 API를 호출하는 개인용 버전</div>
+</div>
+
+<div class="card">
+<h3>1. 상품 찾기</h3>
+<div class="row">
+<input id="keyword" value="30th CELEBRATION" placeholder="상품명 검색">
+<button onclick="findProduct()">상품검색</button>
+</div>
+<div id="products"></div>
+</div>
+
+<div class="card">
+<h3>2. 매장 범위</h3>
+<input id="storeSearch" value="당산" placeholder="예: 당산, 영등포, 문래">
+<div class="row" style="margin-top:8px">
+<button onclick="findStores()">매장 찾기</button>
+<button onclick="checkSelected()">선택 매장 재고조회</button>
+</div>
+<div id="stores"></div>
+</div>
+
+<div class="card">
+<h3>조회 결과</h3>
+<div id="status" class="muted">상품을 검색하고 매장을 선택하세요.</div>
+<div id="results"></div>
+</div>
+
+<script>
+let selectedProduct=null, stores=[];
+
+async function findProduct(){
+  const k=document.getElementById('keyword').value.trim();
+  const box=document.getElementById('products'); box.innerHTML='검색 중...';
+  try{
+    const r=await fetch('/api/search?keyword='+encodeURIComponent(k));
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||'검색 실패');
+    box.innerHTML=(j.productList||[]).map((p,i)=>`
+      <div class="result">
+        <b>${esc(p.goodsNm||'상품명 없음')}</b><br>
+        <span class="muted">PLU: ${esc(p.pluCd||'')} · ${esc(p.viewPrice||p.originPrice||'')}원</span>
+        <button style="float:right" onclick='selectProduct(${JSON.stringify(p)})'>선택</button>
+      </div>`).join('') || '<div class="muted">검색 결과 없음</div>';
+  }catch(e){box.innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+}
+function selectProduct(p){
+  selectedProduct=p;
+  document.getElementById('status').innerHTML='선택 상품: <b>'+esc(p.goodsNm)+'</b> / PLU '+esc(p.pluCd);
+}
+async function findStores(){
+  const q=document.getElementById('storeSearch').value.trim();
+  const box=document.getElementById('stores'); box.innerHTML='매장 찾는 중...';
+  try{
+    const r=await fetch('/api/stores?search='+encodeURIComponent(q));
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||'매장 검색 실패');
+    stores=j.data||[];
+    box.innerHTML=stores.map((s,i)=>`
+      <label class="result" style="display:block">
+      <input type="checkbox" class="store" data-i="${i}" checked>
+      <b>${esc(s.TITLE||'')}</b><br><span class="muted">${esc(s.ADDRESS||s.ADDRESS_DE||'')} · ${esc(s.CODE||'')}</span>
+      </label>`).join('') || '매장 없음';
+  }catch(e){box.innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+}
+async function checkSelected(){
+  if(!selectedProduct){alert('먼저 상품을 선택하세요.');return}
+  const picks=[...document.querySelectorAll('.store:checked')].map(x=>stores[+x.dataset.i]).filter(Boolean);
+  if(!picks.length){alert('매장을 선택하세요.');return}
+  document.getElementById('status').textContent='실제 재고 조회 중...';
+  document.getElementById('results').innerHTML='';
+  try{
+    const r=await fetch('/api/stock?pluCd='+encodeURIComponent(selectedProduct.pluCd)+'&bizNoArr='+encodeURIComponent(picks.map(s=>s.CODE).join(',')));
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||'재고조회 실패');
+    const qty={}; (j.storeGoodsQty||[]).forEach(x=>qty[x.BIZNO]=x.BIZQTY);
+    document.getElementById('results').innerHTML=picks.map(s=>{
+      const q=qty[s.CODE];
+      return `<div class="result"><b>${esc(s.TITLE)}</b><br><span class="muted">${esc(s.ADDRESS||'')}</span><br><span class="qty ${q>0?'ok':'zero'}">${q==null?'미응답':q+'개'}</span></div>`;
+    }).join('');
+    document.getElementById('status').textContent='조회 완료 · 이마트24 전산 응답 기준';
+  }catch(e){document.getElementById('status').innerHTML='<span class="err">'+esc(e.message)+'</span>'}
+}
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+findProduct();
+findStores();
+</script>
+</body>
+</html>
